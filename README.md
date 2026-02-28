@@ -44,14 +44,11 @@ A mobile-first maintenance management system for Tokka's nail & wire manufacturi
 
 ### 4. Configure Environment Variables
 
-```bash
-cp .env.local.example .env.local
-```
+Copy `.env.local.example` to `.env.local` and fill in:
 
-Edit `.env.local`:
 ```
-NEXT_PUBLIC_SUPABASE_URL=https://your-project-ref.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key-here
+NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
 ```
 
 ### 5. Install Dependencies & Run
@@ -63,6 +60,10 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000)
 
+### 6. (Optional) Seed Demo Data
+
+Run `supabase/seed.sql` in the SQL Editor to populate with sample machines, work orders, and PM schedules.
+
 ---
 
 ## Project Structure
@@ -70,49 +71,43 @@ Open [http://localhost:3000](http://localhost:3000)
 ```
 src/
 ├── app/
-│   ├── (dashboard)/          # Protected routes
-│   │   ├── layout.tsx         # Sidebar + mobile nav
-│   │   ├── page.tsx            # Dashboard home
+│   ├── (dashboard)/
+│   │   ├── layout.tsx          # Sidebar + header shell
+│   │   ├── page.tsx            # Dashboard overview
 │   │   ├── machines/           # Machine registry
 │   │   ├── work-orders/        # Work order management
-│   │   └── pm-schedule/        # Preventive maintenance
-│   ├── login/               # Auth page
-│   ├── layout.tsx           # Root layout
-│   └── globals.css          # Global styles
+│   │   ├── pm-schedule/        # Preventive maintenance
+│   │   └── downtime/           # Downtime tracking
+│   ├── login/
+│   │   └── page.tsx            # Auth page
+│   ├── globals.css
+│   └── layout.tsx
 ├── components/
-│   ├── ui/                  # shadcn/ui components
-│   └── providers/           # Context providers
+│   ├── ui/                     # shadcn/ui primitives
+│   └── *.tsx                   # Shared components
+├── contexts/
+│   └── auth-context.tsx
+├── hooks/
+│   ├── use-supabase.ts
+│   └── use-toast.ts
 ├── lib/
-│   └── supabase/            # Supabase client, helpers
-└── middleware.ts            # Auth middleware
+│   ├── supabase/               # Supabase client helpers
+│   ├── constants.ts
+│   └── utils.ts
+├── types/
+│   └── database.ts             # Generated Supabase types
 supabase/
-└── migration.sql            # Full DB schema
+├── migration.sql               # Full schema
+└── seed.sql                    # Demo data
 ```
 
 ---
 
-## Default Login
+## Default Credentials (after seed)
 
-After running the migration, create your first admin user via Supabase Auth dashboard or the SQL editor:
+| Role | Email | Password |
+|------|-------|----------|
+| Admin | admin@tokka.id | tokka2024 |
+| Technician | tech@tokka.id | tokka2024 |
 
-```sql
--- Insert admin profile after creating user via Supabase Auth
-INSERT INTO profiles (id, name, role)
-VALUES ('your-auth-user-uuid', 'Admin', 'admin');
-```
-
----
-
-## Mobile Usage
-
-The app is optimized for phone use:
-- Bottom navigation bar on mobile
-- Large tap targets (min 44px)
-- Camera integration for photos
-- Offline-friendly optimistic updates
-
----
-
-## License
-
-Private — Tokka Manufacturing
+> **Note**: Change these in production. The seed script creates auth users via Supabase's `auth.users` — you may need to create them manually in the Supabase Auth dashboard if the SQL approach doesn't work in your project.

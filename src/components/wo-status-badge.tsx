@@ -1,30 +1,21 @@
-import { cn } from '@/lib/utils'
-import type { WorkOrderStatus } from '@/types/database'
+import { cn } from '@/lib/utils';
 
-const WO_STATUS_CONFIG: Record<WorkOrderStatus, { label: string; bg: string; text: string }> = {
-  open: { label: 'Open', bg: 'bg-slate-500/20', text: 'text-slate-300' },
-  assigned: { label: 'Assigned', bg: 'bg-blue-500/20', text: 'text-blue-400' },
-  in_progress: { label: 'In Progress', bg: 'bg-amber-500/20', text: 'text-amber-400' },
-  completed: { label: 'Completed', bg: 'bg-emerald-500/20', text: 'text-emerald-400' },
-}
+const woStatusConfig: Record<string, { label: string; className: string }> = {
+  open: { label: 'Open', className: 'bg-blue-50 text-blue-700 border-blue-200' },
+  in_progress: { label: 'In Progress', className: 'bg-yellow-50 text-yellow-700 border-yellow-200' },
+  resolved: { label: 'Resolved', className: 'bg-green-50 text-green-700 border-green-200' },
+  closed: { label: 'Closed', className: 'bg-gray-50 text-gray-600 border-gray-200' },
+};
 
 interface WoStatusBadgeProps {
-  status: WorkOrderStatus
-  className?: string
+  status: string;
 }
 
-export function WoStatusBadge({ status, className }: WoStatusBadgeProps) {
-  const config = WO_STATUS_CONFIG[status]
+export function WoStatusBadge({ status }: WoStatusBadgeProps) {
+  const config = woStatusConfig[status] || { label: status, className: 'bg-gray-50 text-gray-600' };
   return (
-    <span
-      className={cn(
-        'inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium font-body',
-        config.bg,
-        config.text,
-        className
-      )}
-    >
+    <span className={cn('inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border', config.className)}>
       {config.label}
     </span>
-  )
+  );
 }

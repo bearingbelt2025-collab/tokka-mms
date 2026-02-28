@@ -1,47 +1,45 @@
-import { cn } from '@/lib/utils'
-import type { MachineStatus } from '@/types/database'
+import { cn } from '@/lib/utils';
 
-const STATUS_CONFIG: Record<MachineStatus, { label: string; dot: string; text: string; bg: string }> = {
+const statusConfig: Record<string, { label: string; className: string; dotColor: string }> = {
   running: {
     label: 'Running',
-    dot: 'bg-emerald-500',
-    text: 'text-emerald-400',
-    bg: 'bg-emerald-500/10',
+    className: 'bg-green-50 text-green-700 border-green-200',
+    dotColor: 'bg-green-500',
   },
   maintenance_due: {
-    label: 'Maintenance Due',
-    dot: 'bg-amber-500',
-    text: 'text-amber-400',
-    bg: 'bg-amber-500/10',
+    label: 'Maint. Due',
+    className: 'bg-yellow-50 text-yellow-700 border-yellow-200',
+    dotColor: 'bg-yellow-500',
   },
   breakdown: {
     label: 'Breakdown',
-    dot: 'bg-red-500',
-    text: 'text-red-400',
-    bg: 'bg-red-500/10',
+    className: 'bg-red-50 text-red-700 border-red-200',
+    dotColor: 'bg-red-500',
   },
-}
+  offline: {
+    label: 'Offline',
+    className: 'bg-gray-50 text-gray-600 border-gray-200',
+    dotColor: 'bg-gray-400',
+  },
+};
 
 interface StatusBadgeProps {
-  status: MachineStatus
-  size?: 'sm' | 'md'
-  className?: string
+  status: string;
+  size?: 'default' | 'dot';
 }
 
-export function StatusBadge({ status, size = 'md', className }: StatusBadgeProps) {
-  const config = STATUS_CONFIG[status]
+export function StatusBadge({ status, size = 'default' }: StatusBadgeProps) {
+  const config = statusConfig[status] || { label: status, className: 'bg-gray-50 text-gray-600', dotColor: 'bg-gray-400' };
+
+  if (size === 'dot') {
+    return (
+      <div className={cn('h-2.5 w-2.5 rounded-full flex-shrink-0', config.dotColor)} />
+    );
+  }
+
   return (
-    <span
-      className={cn(
-        'inline-flex items-center gap-1.5 rounded-sm font-body font-medium',
-        config.bg,
-        config.text,
-        size === 'sm' ? 'px-1.5 py-0.5 text-xs' : 'px-2 py-1 text-sm',
-        className
-      )}
-    >
-      <span className={cn('rounded-full shrink-0', config.dot, size === 'sm' ? 'h-1.5 w-1.5' : 'h-2 w-2')} />
+    <span className={cn('inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border', config.className)}>
       {config.label}
     </span>
-  )
+  );
 }

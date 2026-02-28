@@ -1,319 +1,203 @@
-'use client'
+'use client';
 
-import { useEffect, useState, useCallback } from 'react'
-import { createClient } from '@/lib/supabase/client'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
+import { useEffect, useState } from 'react';
+import { createClient } from '@/lib/supabase/client';
+import { useAuth } from '@/contexts/auth-context';
+import { KpiCard } from '@/components/kpi-card';
+import { StatusBadge } from '@/components/status-badge';
+import { PageHeader } from '@/components/page-header';
+import { LoadingSkeleton } from '@/components/loading-skeleton';
 import {
   Wrench,
+  ClipboardList,
+  CalendarClock,
   AlertTriangle,
-  CheckCircle,
   Clock,
-  TrendingDown,
-  RefreshCw,
-  Plus,
-  Activity
-} from 'lucide-react'
-import Link from 'next/link'
+  CheckCircle,
+  XCircle,
+  AlertCircle,
+} from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { MACHINE_STATUSES, PRIORITY_COLORS } from '@/lib/constants';
 
 interface DashboardStats {
-  totalMachines: number
-  runningMachines: number
-  maintenanceDueMachines: number
-  breakdownMachines: number
-  openWorkOrders: number
-  overdueWorkOrders: number
-  overduepmSchedules: number
-  totalDowntimeHours: number
-}
-
-interface RecentWorkOrder {
-  id: string
-  title: string
-  priority: string
-  status: string
-  created_at: string
-  machines: { name: string } | null
-}
-
-interface MachineStatus {
-  id: string
-  name: string
-  status: string
-  location: string
+  totalMachines: number;
+  runningMachines: number;
+  maintenanceDueMachines: number;
+  breakdownMachines: number;
+  openWorkOrders: number;
+  inProgressWorkOrders: number;
+  overduepmSchedules: number;
+  totalDowntimeHours: number;
+  activeDowntime: number;
 }
 
 export default function DashboardPage() {
-  const [stats, setStats] = useState<DashboardStats>({
-    totalMachines: 0,
-    runningMachines: 0,
-    maintenanceDueMachines: 0,
-    breakdownMachines: 0,
-    openWorkOrders: 0,
-    overdueWorkOrders: 0,
-    overduepmSchedules: 0,
-    totalDowntimeHours: 0,
-  })
-  const [recentWorkOrders, setRecentWorkOrders] = useState<RecentWorkOrder[]>([])
-  const [machineStatuses, setMachineStatuses] = useState<MachineStatus[]>([])
-  const [loading, setLoading] = useState(true)
-  const supabase = createClient()
-
-  const fetchDashboardData = useCallback(async () => {
-    try {
-      // Fetch machines
-      const { data: machines } = await supabase
-        .from('machines')
-        .select('id, name, status, location')
-
-      // Fetch work orders
-      const { data: workOrders } = await supabase
-        .from('work_orders')
-        .select('id, title, priority, status, created_at, machines(name)')
-        .order('created_at', { ascending: false })
-        .limit(5)
-
-      // Fetch all work orders for stats
-      const { data: allWorkOrders } = await supabase
-        .from('work_orders')
-        .select('id, status, due_date')
-
-      // Fetch overdue PM schedules
-      const { data: pmSchedules } = await supabase
-        .from('pm_schedules')
-        .select('id, next_due_date, is_active')
-        .eq('is_active', true)
-
-      // Fetch downtime logs
-      const { data: downtimeLogs } = await supabase
-        .from('downtime_logs')
-        .select('duration_minutes')
-        .not('duration_minutes', 'is', null)
-
-      const now = new Date()
-
-      setStats({
-        totalMachines: machines?.length || 0,
-        runningMachines: machines?.filter(m => m.status === 'running').length || 0,
-        maintenanceDueMachines: machines?.filter(m => m.status === 'maintenance_due').length || 0,
-        breakdownMachines: machines?.filter(m => m.status === 'breakdown').length || 0,
-        openWorkOrders: allWorkOrders?.filter(wo => ['open', 'in_progress'].includes(wo.status)).length || 0,
-        overdueWorkOrders: allWorkOrders?.filter(wo => {
-          if (!wo.due_date || wo.status === 'completed' || wo.status === 'cancelled') return false
-          return new Date(wo.due_date) < now
-        }).length || 0,
-        overduepmSchedules: pmSchedules?.filter(pm => {
-          if (!pm.next_due_date) return false
-          return new Date(pm.next_due_date) < now
-        }).length || 0,
-        totalDowntimeHours: Math.round((downtimeLogs?.reduce((sum, log) => sum + (log.duration_minutes || 0), 0) || 0) / 60 * 10) / 10,
-      })
-
-      setRecentWorkOrders((workOrders as unknown as RecentWorkOrder[]) || [])
-      setMachineStatuses(machines || [])
-    } catch (error) {
-      console.error('Dashboard fetch error:', error)
-    } finally {
-      setLoading(false)
-    }
-  }, [supabase])
+  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [recentWorkOrders, setRecentWorkOrders] = useState<any[]>([]);
+  const [machineStatusList, setMachineStatusList] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const { profile } = useAuth();
+  const supabase = createClient();
 
   useEffect(() => {
-    fetchDashboardData()
+    fetchDashboardData();
 
-    // Set up Realtime subscription
+    // Subscribe to real-time updates
     const channel = supabase
-      .channel('dashboard-changes')
+      .channel('dashboard')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'machines' }, fetchDashboardData)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'work_orders' }, fetchDashboardData)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'downtime_logs' }, fetchDashboardData)
-      .subscribe()
+      .subscribe();
 
-    return () => { supabase.removeChannel(channel) }
-  }, [fetchDashboardData, supabase])
+    return () => { supabase.removeChannel(channel); };
+  }, []);
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'running': return 'bg-green-500'
-      case 'maintenance_due': return 'bg-yellow-500'
-      case 'breakdown': return 'bg-red-500'
-      default: return 'bg-gray-400'
-    }
-  }
+  const fetchDashboardData = async () => {
+    const supabase = createClient();
 
-  const getPriorityBadge = (priority: string) => {
-    const variants: Record<string, 'default' | 'secondary' | 'destructive' | 'outline'> = {
-      critical: 'destructive',
-      high: 'destructive',
-      medium: 'default',
-      low: 'secondary',
-    }
-    return variants[priority] || 'default'
-  }
+    const [machinesRes, workOrdersRes, pmRes, downtimeRes] = await Promise.all([
+      supabase.from('machines').select('id, name, status, location'),
+      supabase.from('work_orders').select('id, title, status, priority, created_at, machines(name)').order('created_at', { ascending: false }).limit(5),
+      supabase.from('pm_schedules').select('id, status'),
+      supabase.from('downtime_logs').select('id, duration_minutes, end_time'),
+    ]);
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <RefreshCw className="h-8 w-8 animate-spin text-blue-600" />
-      </div>
-    )
-  }
+    const machines = machinesRes.data || [];
+    const workOrders = workOrdersRes.data || [];
+    const pmSchedules = pmRes.data || [];
+    const downtimeLogs = downtimeRes.data || [];
+
+    const completedDowntime = downtimeLogs.filter(d => d.end_time && d.duration_minutes);
+    const totalDowntimeHours = completedDowntime.reduce((sum, d) => sum + (d.duration_minutes || 0), 0) / 60;
+    const activeDowntime = downtimeLogs.filter(d => !d.end_time).length;
+
+    setStats({
+      totalMachines: machines.length,
+      runningMachines: machines.filter(m => m.status === 'running').length,
+      maintenanceDueMachines: machines.filter(m => m.status === 'maintenance_due').length,
+      breakdownMachines: machines.filter(m => m.status === 'breakdown').length,
+      openWorkOrders: workOrders.filter(w => w.status === 'open').length,
+      inProgressWorkOrders: workOrders.filter(w => w.status === 'in_progress').length,
+      overduepmSchedules: pmSchedules.filter(p => p.status === 'overdue').length,
+      totalDowntimeHours: Math.round(totalDowntimeHours * 10) / 10,
+      activeDowntime,
+    });
+
+    setRecentWorkOrders(workOrders);
+    setMachineStatusList(machines);
+    setLoading(false);
+  };
+
+  if (loading) return <LoadingSkeleton />;
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Dashboard</h1>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={fetchDashboardData}>
-            <RefreshCw className="h-4 w-4 mr-1" />
-            Refresh
-          </Button>
-          <Link href="/work-orders">
-            <Button size="sm">
-              <Plus className="h-4 w-4 mr-1" />
-              New WO
-            </Button>
-          </Link>
-        </div>
+      <PageHeader
+        title="Dashboard"
+        description={`Welcome back, ${profile?.full_name || 'User'}. Here's your plant overview.`}
+      />
+
+      {/* KPI Row */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <KpiCard
+          title="Total Machines"
+          value={stats?.totalMachines ?? 0}
+          icon={<Wrench className="h-4 w-4" />}
+          description={`${stats?.runningMachines} running`}
+        />
+        <KpiCard
+          title="Open Work Orders"
+          value={(stats?.openWorkOrders ?? 0) + (stats?.inProgressWorkOrders ?? 0)}
+          icon={<ClipboardList className="h-4 w-4" />}
+          description={`${stats?.inProgressWorkOrders} in progress`}
+          variant={((stats?.openWorkOrders ?? 0) + (stats?.inProgressWorkOrders ?? 0)) > 5 ? 'warning' : 'default'}
+        />
+        <KpiCard
+          title="Overdue PM"
+          value={stats?.overduepmSchedules ?? 0}
+          icon={<CalendarClock className="h-4 w-4" />}
+          description="schedules overdue"
+          variant={(stats?.overduepmSchedules ?? 0) > 0 ? 'danger' : 'default'}
+        />
+        <KpiCard
+          title="Downtime Hours"
+          value={stats?.totalDowntimeHours ?? 0}
+          icon={<AlertTriangle className="h-4 w-4" />}
+          description={`${stats?.activeDowntime} active now`}
+          variant={(stats?.activeDowntime ?? 0) > 0 ? 'danger' : 'default'}
+        />
       </div>
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Card>
-          <CardContent className="pt-4 pb-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-muted-foreground">Running</p>
-                <p className="text-2xl font-bold text-green-600">{stats.runningMachines}</p>
-                <p className="text-xs text-muted-foreground">of {stats.totalMachines} machines</p>
-              </div>
-              <CheckCircle className="h-8 w-8 text-green-500 opacity-80" />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="pt-4 pb-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-muted-foreground">Breakdown</p>
-                <p className="text-2xl font-bold text-red-600">{stats.breakdownMachines}</p>
-                <p className="text-xs text-muted-foreground">machines down</p>
-              </div>
-              <AlertTriangle className="h-8 w-8 text-red-500 opacity-80" />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="pt-4 pb-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-muted-foreground">Open WOs</p>
-                <p className="text-2xl font-bold text-blue-600">{stats.openWorkOrders}</p>
-                <p className="text-xs text-muted-foreground">{stats.overdueWorkOrders} overdue</p>
-              </div>
-              <Wrench className="h-8 w-8 text-blue-500 opacity-80" />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="pt-4 pb-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-muted-foreground">Downtime</p>
-                <p className="text-2xl font-bold text-orange-600">{stats.totalDowntimeHours}h</p>
-                <p className="text-xs text-muted-foreground">total logged</p>
-              </div>
-              <TrendingDown className="h-8 w-8 text-orange-500 opacity-80" />
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Overdue Alerts */}
-      {(stats.overdueWorkOrders > 0 || stats.overduepmSchedules > 0) && (
-        <Card className="border-orange-200 bg-orange-50">
-          <CardContent className="pt-4 pb-3">
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="h-5 w-5 text-orange-600" />
-              <span className="font-medium text-orange-800">Attention Required</span>
-            </div>
-            <div className="mt-2 space-y-1">
-              {stats.overdueWorkOrders > 0 && (
-                <p className="text-sm text-orange-700">
-                  {stats.overdueWorkOrders} work order{stats.overdueWorkOrders > 1 ? 's' : ''} overdue
-                </p>
-              )}
-              {stats.overduepmSchedules > 0 && (
-                <p className="text-sm text-orange-700">
-                  {stats.overduepmSchedules} PM schedule{stats.overduepmSchedules > 1 ? 's' : ''} overdue
-                </p>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      <div className="grid md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Machine Status Grid */}
         <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Activity className="h-4 w-4" />
-              Machine Status
-            </CardTitle>
+          <CardHeader>
+            <CardTitle className="text-base">Machine Status</CardTitle>
           </CardHeader>
           <CardContent>
-            {machineStatuses.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-4">No machines registered yet</p>
-            ) : (
-              <div className="grid grid-cols-2 gap-2">
-                {machineStatuses.map((machine) => (
-                  <div key={machine.id} className="flex items-center gap-2 p-2 rounded-lg bg-muted/50">
-                    <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${getStatusColor(machine.status)}`} />
-                    <div className="min-w-0">
-                      <p className="text-xs font-medium truncate">{machine.name}</p>
-                      <p className="text-xs text-muted-foreground truncate">{machine.location}</p>
-                    </div>
+            <div className="grid grid-cols-2 gap-2">
+              {machineStatusList.map((machine) => (
+                <div
+                  key={machine.id}
+                  className="flex items-center gap-2 p-2 rounded-lg border bg-gray-50"
+                >
+                  <StatusBadge status={machine.status} size="dot" />
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium truncate">{machine.name}</p>
+                    <p className="text-xs text-muted-foreground truncate">{machine.location}</p>
                   </div>
-                ))}
-              </div>
-            )}
+                </div>
+              ))}
+            </div>
           </CardContent>
         </Card>
 
         {/* Recent Work Orders */}
         <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Clock className="h-4 w-4" />
-              Recent Work Orders
-            </CardTitle>
+          <CardHeader>
+            <CardTitle className="text-base">Recent Work Orders</CardTitle>
           </CardHeader>
           <CardContent>
-            {recentWorkOrders.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-4">No work orders yet</p>
-            ) : (
-              <div className="space-y-2">
-                {recentWorkOrders.map((wo) => (
-                  <div key={wo.id} className="flex items-center justify-between p-2 rounded-lg bg-muted/50">
-                    <div className="min-w-0 flex-1">
-                      <p className="text-xs font-medium truncate">{wo.title}</p>
-                      <p className="text-xs text-muted-foreground">{wo.machines?.name}</p>
+            <div className="space-y-2">
+              {recentWorkOrders.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-4">No work orders yet</p>
+              ) : (
+                recentWorkOrders.map((wo) => (
+                  <div key={wo.id} className="flex items-start gap-3 p-2 rounded-lg border">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{wo.title}</p>
+                      <p className="text-xs text-muted-foreground">{(wo.machines as any)?.name}</p>
                     </div>
-                    <Badge variant={getPriorityBadge(wo.priority)} className="text-xs ml-2 flex-shrink-0">
-                      {wo.priority}
-                    </Badge>
+                    <div className="flex flex-col items-end gap-1">
+                      <Badge
+                        variant="outline"
+                        className={`text-xs ${PRIORITY_COLORS[wo.priority as keyof typeof PRIORITY_COLORS]}`}
+                      >
+                        {wo.priority}
+                      </Badge>
+                    </div>
                   </div>
-                ))}
-              </div>
-            )}
+                ))
+              )}
+            </div>
           </CardContent>
         </Card>
       </div>
+
+      {/* Breakdown Alert */}
+      {(stats?.breakdownMachines ?? 0) > 0 && (
+        <Card className="border-red-200 bg-red-50">
+          <CardContent className="pt-4">
+            <div className="flex items-center gap-2 text-red-700">
+              <XCircle className="h-5 w-5" />
+              <p className="font-medium">{stats?.breakdownMachines} machine(s) in breakdown status</p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
-  )
+  );
 }

@@ -1,394 +1,311 @@
-'use client'
+'use client';
 
-import { useEffect, useState, useCallback, useRef } from 'react'
-import { createClient } from '@/lib/supabase/client'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Badge } from '@/components/ui/badge'
+import { useEffect, useState } from 'react';
+import { createClient } from '@/lib/supabase/client';
+import { useAuth } from '@/contexts/auth-context';
+import { PageHeader } from '@/components/page-header';
+import { StatusBadge } from '@/components/status-badge';
+import { LoadingSkeleton } from '@/components/loading-skeleton';
+import { EmptyState } from '@/components/empty-state';
 import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  CardDescription
-} from '@/components/ui/card'
+  Wrench,
+  Plus,
+  Search,
+  MoreVertical,
+  MapPin,
+  Calendar,
+  Tag,
+} from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from '@/components/ui/dialog'
+} from '@/components/ui/dialog';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select'
+} from '@/components/ui/select';
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from '@/components/ui/alert-dialog'
-import {
-  Plus,
-  Search,
-  Camera,
-  Wrench,
-  AlertTriangle,
-  CheckCircle,
-  Edit,
-  Trash2,
-  RefreshCw,
-  MapPin,
-  Tag
-} from 'lucide-react'
-import { createClient as createStorageClient } from '@/lib/supabase/client'
-
-type MachineStatus = 'running' | 'maintenance_due' | 'breakdown' | 'decommissioned'
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Textarea } from '@/components/ui/textarea';
+import { Card, CardContent } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { MACHINE_STATUSES, MACHINE_LOCATIONS } from '@/lib/constants';
+import { addMachine, updateMachineStatus } from '@/lib/supabase/mutations';
 
 interface Machine {
-  id: string
-  name: string
-  model: string | null
-  serial_number: string | null
-  location: string
-  status: MachineStatus
-  photo_url: string | null
-  notes: string | null
-  created_at: string
-}
-
-const statusConfig = {
-  running: { label: 'Running', color: 'bg-green-100 text-green-800 border-green-200', icon: CheckCircle, dot: 'bg-green-500' },
-  maintenance_due: { label: 'Maint. Due', color: 'bg-yellow-100 text-yellow-800 border-yellow-200', icon: Wrench, dot: 'bg-yellow-500' },
-  breakdown: { label: 'Breakdown', color: 'bg-red-100 text-red-800 border-red-200', icon: AlertTriangle, dot: 'bg-red-500' },
-  decommissioned: { label: 'Decommissioned', color: 'bg-gray-100 text-gray-600 border-gray-200', icon: RefreshCw, dot: 'bg-gray-400' },
+  id: string;
+  name: string;
+  model: string | null;
+  serial_number: string | null;
+  location: string;
+  status: string;
+  notes: string | null;
+  installed_at: string | null;
+  last_maintained_at: string | null;
 }
 
 export default function MachinesPage() {
-  const [machines, setMachines] = useState<Machine[]>([])
-  const [loading, setLoading] = useState(true)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [statusFilter, setStatusFilter] = useState<string>('all')
-  const [dialogOpen, setDialogOpen] = useState(false)
-  const [editingMachine, setEditingMachine] = useState<Machine | null>(null)
-  const [photoFile, setPhotoFile] = useState<File | null>(null)
-  const [photoPreview, setPhotoPreview] = useState<string | null>(null)
-  const [uploading, setUploading] = useState(false)
-  const [saving, setSaving] = useState(false)
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  const supabase = createClient()
+  const [machines, setMachines] = useState<Machine[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editMachine, setEditMachine] = useState<Machine | null>(null);
+  const { profile } = useAuth();
+  const supabase = createClient();
 
-  const [formData, setFormData] = useState({
-    name: '',
-    model: '',
-    serial_number: '',
-    location: '',
-    status: 'running' as MachineStatus,
-    notes: '',
-  })
-
-  const fetchMachines = useCallback(async () => {
-    const { data } = await supabase
-      .from('machines')
-      .select('*')
-      .order('name')
-    setMachines(data || [])
-    setLoading(false)
-  }, [supabase])
+  const isAdmin = profile?.role === 'admin';
 
   useEffect(() => {
-    fetchMachines()
+    fetchMachines();
     const channel = supabase
-      .channel('machines-page')
+      .channel('machines')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'machines' }, fetchMachines)
-      .subscribe()
-    return () => { supabase.removeChannel(channel) }
-  }, [fetchMachines, supabase])
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, []);
 
-  const filteredMachines = machines.filter(machine => {
-    const matchesSearch = machine.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      machine.location.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (machine.model && machine.model.toLowerCase().includes(searchQuery.toLowerCase()))
-    const matchesStatus = statusFilter === 'all' || machine.status === statusFilter
-    return matchesSearch && matchesStatus
-  })
+  const fetchMachines = async () => {
+    const supabase = createClient();
+    const { data } = await supabase.from('machines').select('*').order('name');
+    setMachines(data || []);
+    setLoading(false);
+  };
 
-  const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    setPhotoFile(file)
-    const reader = new FileReader()
-    reader.onloadend = () => setPhotoPreview(reader.result as string)
-    reader.readAsDataURL(file)
-  }
+  const filtered = machines.filter((m) => {
+    const matchSearch = m.name.toLowerCase().includes(search.toLowerCase()) ||
+      m.location.toLowerCase().includes(search.toLowerCase());
+    const matchStatus = statusFilter === 'all' || m.status === statusFilter;
+    return matchSearch && matchStatus;
+  });
 
-  const uploadPhoto = async (machineId: string): Promise<string | null> => {
-    if (!photoFile) return editingMachine?.photo_url || null
-    setUploading(true)
-    const storage = createStorageClient()
-    const ext = photoFile.name.split('.').pop()
-    const fileName = `${machineId}-${Date.now()}.${ext}`
-    const { error } = await storage.storage
-      .from('photos')
-      .upload(fileName, photoFile, { upsert: true })
-    setUploading(false)
-    if (error) { console.error('Upload error:', error); return null }
-    const { data } = storage.storage.from('photos').getPublicUrl(fileName)
-    return data.publicUrl
-  }
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const form = e.currentTarget;
+    const fd = new FormData(form);
+    const payload = {
+      name: fd.get('name') as string,
+      model: fd.get('model') as string || null,
+      serial_number: fd.get('serial_number') as string || null,
+      location: fd.get('location') as string,
+      status: fd.get('status') as string,
+      notes: fd.get('notes') as string || null,
+      installed_at: fd.get('installed_at') as string || null,
+    };
 
-  const handleSubmit = async () => {
-    if (!formData.name || !formData.location) return
-    setSaving(true)
-
-    try {
-      if (editingMachine) {
-        const photoUrl = await uploadPhoto(editingMachine.id)
-        const { error } = await supabase
-          .from('machines')
-          .update({ ...formData, photo_url: photoUrl, updated_at: new Date().toISOString() })
-          .eq('id', editingMachine.id)
-        if (error) throw error
-      } else {
-        const tempId = crypto.randomUUID()
-        const photoUrl = await uploadPhoto(tempId)
-        const { error } = await supabase
-          .from('machines')
-          .insert([{ ...formData, photo_url: photoUrl }])
-        if (error) throw error
-      }
-
-      setDialogOpen(false)
-      resetForm()
-      fetchMachines()
-    } catch (error) {
-      console.error('Save error:', error)
-    } finally {
-      setSaving(false)
+    if (editMachine) {
+      const supabase = createClient();
+      await supabase.from('machines').update(payload).eq('id', editMachine.id);
+    } else {
+      await addMachine(payload);
     }
-  }
+    setDialogOpen(false);
+    setEditMachine(null);
+    fetchMachines();
+  };
+
+  const handleStatusChange = async (machineId: string, newStatus: string) => {
+    await updateMachineStatus(machineId, newStatus);
+    fetchMachines();
+  };
 
   const handleDelete = async (id: string) => {
-    await supabase.from('machines').delete().eq('id', id)
-    fetchMachines()
-  }
+    const supabase = createClient();
+    await supabase.from('machines').delete().eq('id', id);
+    fetchMachines();
+  };
 
-  const resetForm = () => {
-    setFormData({ name: '', model: '', serial_number: '', location: '', status: 'running', notes: '' })
-    setPhotoFile(null)
-    setPhotoPreview(null)
-    setEditingMachine(null)
-  }
-
-  const openEditDialog = (machine: Machine) => {
-    setEditingMachine(machine)
-    setFormData({
-      name: machine.name,
-      model: machine.model || '',
-      serial_number: machine.serial_number || '',
-      location: machine.location,
-      status: machine.status,
-      notes: machine.notes || '',
-    })
-    setPhotoPreview(machine.photo_url)
-    setDialogOpen(true)
-  }
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <RefreshCw className="h-8 w-8 animate-spin text-blue-600" />
-      </div>
-    )
-  }
+  if (loading) return <LoadingSkeleton />;
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Machines</h1>
-        <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) resetForm() }}>
-          <DialogTrigger asChild>
-            <Button size="sm">
-              <Plus className="h-4 w-4 mr-1" /> Add Machine
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>{editingMachine ? 'Edit Machine' : 'Add Machine'}</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4 pt-2">
-              <div className="space-y-1.5">
-                <Label htmlFor="name">Machine Name *</Label>
-                <Input id="name" value={formData.name} onChange={e => setFormData(p => ({ ...p, name: e.target.value }))} placeholder="Wire Drawing Machine #1" />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label htmlFor="model">Model</Label>
-                  <Input id="model" value={formData.model} onChange={e => setFormData(p => ({ ...p, model: e.target.value }))} placeholder="WD-500" />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="serial">Serial No.</Label>
-                  <Input id="serial" value={formData.serial_number} onChange={e => setFormData(p => ({ ...p, serial_number: e.target.value }))} placeholder="SN-12345" />
-                </div>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="location">Location *</Label>
-                <Input id="location" value={formData.location} onChange={e => setFormData(p => ({ ...p, location: e.target.value }))} placeholder="Bay A - Row 1" />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Status</Label>
-                <Select value={formData.status} onValueChange={(v: MachineStatus) => setFormData(p => ({ ...p, status: v }))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="running">Running</SelectItem>
-                    <SelectItem value="maintenance_due">Maintenance Due</SelectItem>
-                    <SelectItem value="breakdown">Breakdown</SelectItem>
-                    <SelectItem value="decommissioned">Decommissioned</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label>Photo</Label>
-                <div
-                  className="border-2 border-dashed rounded-lg p-4 text-center cursor-pointer hover:border-blue-400 transition-colors"
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  {photoPreview ? (
-                    <img src={photoPreview} alt="Preview" className="max-h-32 mx-auto rounded object-cover" />
-                  ) : (
-                    <div className="flex flex-col items-center gap-2 text-muted-foreground">
-                      <Camera className="h-8 w-8" />
-                      <span className="text-sm">Tap to add photo</span>
+      <PageHeader
+        title="Machine Registry"
+        description="All machines with real-time status"
+        action={
+          isAdmin ? (
+            <Dialog open={dialogOpen} onOpenChange={(o) => { setDialogOpen(o); if (!o) setEditMachine(null); }}>
+              <DialogTrigger asChild>
+                <Button size="sm" className="gap-1.5">
+                  <Plus className="h-4 w-4" /> Add Machine
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+                <DialogHeader>
+                  <DialogTitle>{editMachine ? 'Edit Machine' : 'Add New Machine'}</DialogTitle>
+                </DialogHeader>
+                <form onSubmit={handleSubmit} className="space-y-3">
+                  <div className="space-y-1">
+                    <Label htmlFor="name">Machine Name *</Label>
+                    <Input id="name" name="name" defaultValue={editMachine?.name} required />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <Label htmlFor="model">Model</Label>
+                      <Input id="model" name="model" defaultValue={editMachine?.model || ''} />
                     </div>
-                  )}
-                </div>
-                <input ref={fileInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handlePhotoChange} />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="notes">Notes</Label>
-                <Input id="notes" value={formData.notes} onChange={e => setFormData(p => ({ ...p, notes: e.target.value }))} placeholder="Additional notes..." />
-              </div>
-              <Button className="w-full" onClick={handleSubmit} disabled={saving || uploading}>
-                {saving || uploading ? <RefreshCw className="h-4 w-4 animate-spin mr-2" /> : null}
-                {editingMachine ? 'Save Changes' : 'Add Machine'}
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
-      </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="serial_number">Serial No.</Label>
+                      <Input id="serial_number" name="serial_number" defaultValue={editMachine?.serial_number || ''} />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="location">Location *</Label>
+                    <Select name="location" defaultValue={editMachine?.location || MACHINE_LOCATIONS[0]}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {MACHINE_LOCATIONS.map(l => (
+                          <SelectItem key={l} value={l}>{l}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="status">Status *</Label>
+                    <Select name="status" defaultValue={editMachine?.status || 'running'}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {MACHINE_STATUSES.map(s => (
+                          <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="installed_at">Installation Date</Label>
+                    <Input id="installed_at" name="installed_at" type="date" defaultValue={editMachine?.installed_at?.split('T')[0] || ''} />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="notes">Notes</Label>
+                    <Textarea id="notes" name="notes" rows={2} defaultValue={editMachine?.notes || ''} />
+                  </div>
+                  <div className="flex gap-2 pt-2">
+                    <Button type="submit" className="flex-1">{editMachine ? 'Save Changes' : 'Add Machine'}</Button>
+                    <Button type="button" variant="outline" onClick={() => { setDialogOpen(false); setEditMachine(null); }}>Cancel</Button>
+                  </div>
+                </form>
+              </DialogContent>
+            </Dialog>
+          ) : undefined
+        }
+      />
 
       {/* Filters */}
-      <div className="flex gap-2">
-        <div className="relative flex-1">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+      <div className="flex gap-3 flex-wrap">
+        <div className="relative flex-1 min-w-[200px]">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Search machines..."
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            className="pl-8"
+            className="pl-9"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
           />
         </div>
         <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-36">
-            <SelectValue placeholder="Status" />
+          <SelectTrigger className="w-40">
+            <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All Status</SelectItem>
-            <SelectItem value="running">Running</SelectItem>
-            <SelectItem value="maintenance_due">Maint. Due</SelectItem>
-            <SelectItem value="breakdown">Breakdown</SelectItem>
-            <SelectItem value="decommissioned">Decommissioned</SelectItem>
+            <SelectItem value="all">All Statuses</SelectItem>
+            {MACHINE_STATUSES.map(s => (
+              <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
+            ))}
           </SelectContent>
         </Select>
       </div>
 
-      {/* Machine Cards */}
-      {filteredMachines.length === 0 ? (
-        <Card>
-          <CardContent className="py-12 text-center">
-            <Wrench className="h-12 w-12 text-muted-foreground mx-auto mb-3" />
-            <p className="text-muted-foreground">No machines found</p>
-            <p className="text-sm text-muted-foreground mt-1">Add your first machine to get started</p>
-          </CardContent>
-        </Card>
+      {filtered.length === 0 ? (
+        <EmptyState
+          icon={<Wrench className="h-8 w-8" />}
+          title="No machines found"
+          description={search ? 'Try adjusting your search' : 'Add your first machine to get started'}
+        />
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2">
-          {filteredMachines.map((machine) => {
-            const config = statusConfig[machine.status]
-            const StatusIcon = config.icon
-            return (
-              <Card key={machine.id} className="overflow-hidden">
-                {machine.photo_url && (
-                  <div className="h-32 overflow-hidden">
-                    <img src={machine.photo_url} alt={machine.name} className="w-full h-full object-cover" />
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {filtered.map((machine) => (
+            <Card key={machine.id} className="relative">
+              <CardContent className="pt-4 pb-4">
+                <div className="flex items-start justify-between mb-3">
+                  <div className="flex-1 min-w-0">
+                    <h3 className="font-semibold text-sm truncate">{machine.name}</h3>
+                    {machine.model && (
+                      <p className="text-xs text-muted-foreground">{machine.model}</p>
+                    )}
                   </div>
-                )}
-                <CardContent className="p-3">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <div className={`w-2 h-2 rounded-full flex-shrink-0 ${config.dot}`} />
-                        <h3 className="font-semibold text-sm truncate">{machine.name}</h3>
-                      </div>
-                      {machine.model && (
-                        <div className="flex items-center gap-1 mt-1">
-                          <Tag className="h-3 w-3 text-muted-foreground" />
-                          <span className="text-xs text-muted-foreground">{machine.model}</span>
-                        </div>
-                      )}
-                      <div className="flex items-center gap-1 mt-0.5">
-                        <MapPin className="h-3 w-3 text-muted-foreground" />
-                        <span className="text-xs text-muted-foreground">{machine.location}</span>
-                      </div>
-                    </div>
-                    <div className="flex flex-col items-end gap-1">
-                      <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${config.color}`}>
-                        {config.label}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="flex gap-2 mt-3">
-                    <Button variant="outline" size="sm" className="flex-1 h-8" onClick={() => openEditDialog(machine)}>
-                      <Edit className="h-3 w-3 mr-1" /> Edit
-                    </Button>
-                    <AlertDialog>
-                      <AlertDialogTrigger asChild>
-                        <Button variant="outline" size="sm" className="h-8 text-red-600 hover:text-red-700">
-                          <Trash2 className="h-3 w-3" />
-                        </Button>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>Delete Machine?</AlertDialogTitle>
-                          <AlertDialogDescription>
-                            This will permanently delete {machine.name} and all associated data.
-                          </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel>Cancel</AlertDialogCancel>
-                          <AlertDialogAction onClick={() => handleDelete(machine.id)} className="bg-red-600 hover:bg-red-700">
+                  <div className="flex items-center gap-2 ml-2">
+                    <StatusBadge status={machine.status} />
+                    {isAdmin && (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-7 w-7">
+                            <MoreVertical className="h-3.5 w-3.5" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => { setEditMachine(machine); setDialogOpen(true); }}>
+                            Edit
+                          </DropdownMenuItem>
+                          {MACHINE_STATUSES.map(s => (
+                            <DropdownMenuItem
+                              key={s.value}
+                              onClick={() => handleStatusChange(machine.id, s.value)}
+                              disabled={machine.status === s.value}
+                            >
+                              Set: {s.label}
+                            </DropdownMenuItem>
+                          ))}
+                          <DropdownMenuItem
+                            className="text-red-600"
+                            onClick={() => handleDelete(machine.id)}
+                          >
                             Delete
-                          </AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
                   </div>
-                </CardContent>
-              </Card>
-            )
-          })}
+                </div>
+
+                <div className="space-y-1">
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <MapPin className="h-3 w-3" />
+                    {machine.location}
+                  </div>
+                  {machine.serial_number && (
+                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <Tag className="h-3 w-3" />
+                      SN: {machine.serial_number}
+                    </div>
+                  )}
+                  {machine.installed_at && (
+                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <Calendar className="h-3 w-3" />
+                      Installed: {new Date(machine.installed_at).toLocaleDateString()}
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          ))}
         </div>
       )}
     </div>
-  )
+  );
 }

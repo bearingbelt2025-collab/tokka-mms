@@ -1,30 +1,21 @@
-import { cn } from '@/lib/utils'
-import type { WorkOrderPriority } from '@/types/database'
+import { cn } from '@/lib/utils';
 
-const PRIORITY_CONFIG: Record<WorkOrderPriority, { label: string; bg: string; text: string }> = {
-  low: { label: 'Low', bg: 'bg-slate-500/20', text: 'text-slate-300' },
-  medium: { label: 'Medium', bg: 'bg-blue-500/20', text: 'text-blue-400' },
-  high: { label: 'High', bg: 'bg-amber-500/20', text: 'text-amber-400' },
-  critical: { label: 'Critical', bg: 'bg-red-500/20', text: 'text-red-400' },
-}
+const priorityConfig: Record<string, { label: string; className: string }> = {
+  low: { label: 'Low', className: 'bg-green-50 text-green-700 border-green-200' },
+  medium: { label: 'Medium', className: 'bg-yellow-50 text-yellow-700 border-yellow-200' },
+  high: { label: 'High', className: 'bg-orange-50 text-orange-700 border-orange-200' },
+  critical: { label: 'Critical', className: 'bg-red-50 text-red-700 border-red-200' },
+};
 
 interface PriorityBadgeProps {
-  priority: WorkOrderPriority
-  className?: string
+  priority: string;
 }
 
-export function PriorityBadge({ priority, className }: PriorityBadgeProps) {
-  const config = PRIORITY_CONFIG[priority]
+export function PriorityBadge({ priority }: PriorityBadgeProps) {
+  const config = priorityConfig[priority] || { label: priority, className: 'bg-gray-50 text-gray-600' };
   return (
-    <span
-      className={cn(
-        'inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium font-mono-display',
-        config.bg,
-        config.text,
-        className
-      )}
-    >
-      {config.label.toUpperCase()}
+    <span className={cn('inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border', config.className)}>
+      {config.label}
     </span>
-  )
+  );
 }

@@ -1,35 +1,17 @@
-import { LucideIcon } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-
 interface PageHeaderProps {
-  title: string
-  subtitle?: string
-  action?: {
-    label: string
-    onClick: () => void
-    icon?: LucideIcon
-  }
+  title: string;
+  description?: string;
+  action?: React.ReactNode;
 }
 
-export function PageHeader({ title, subtitle, action }: PageHeaderProps) {
+export function PageHeader({ title, description, action }: PageHeaderProps) {
   return (
-    <div className="flex items-center justify-between mb-6">
+    <div className="flex items-start justify-between">
       <div>
-        <h1 className="text-xl font-bold font-mono-display">{title}</h1>
-        {subtitle && (
-          <p className="text-sm text-muted-foreground mt-0.5">{subtitle}</p>
-        )}
+        <h1 className="text-xl font-bold tracking-tight">{title}</h1>
+        {description && <p className="text-sm text-muted-foreground mt-0.5">{description}</p>}
       </div>
-      {action && (
-        <Button
-          onClick={action.onClick}
-          size="sm"
-          className="bg-primary hover:bg-primary/90 text-primary-foreground font-medium"
-        >
-          {action.icon && <action.icon className="h-4 w-4 mr-1.5" />}
-          {action.label}
-        </Button>
-      )}
+      {action && <div>{action}</div>}
     </div>
-  )
+  );
 }

@@ -1,194 +1,189 @@
 -- Enable UUID extension
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+create extension if not exists "uuid-ossp";
 
--- Create enum types
-CREATE TYPE user_role AS ENUM ('admin', 'manager', 'operator', 'viewer');
-CREATE TYPE machine_status AS ENUM ('operational', 'maintenance', 'breakdown', 'idle', 'decommissioned');
-CREATE TYPE request_priority AS ENUM ('low', 'medium', 'high', 'critical');
-CREATE TYPE request_status AS ENUM ('pending', 'approved', 'in_progress', 'completed', 'cancelled', 'rejected');
-CREATE TYPE maintenance_type AS ENUM ('preventive', 'corrective', 'predictive', 'emergency');
-
--- Create profiles table (extends Supabase auth.users)
-CREATE TABLE profiles (
-  id UUID REFERENCES auth.users(id) ON DELETE CASCADE PRIMARY KEY,
-  email TEXT NOT NULL UNIQUE,
-  full_name TEXT,
-  role user_role NOT NULL DEFAULT 'viewer',
-  department TEXT,
-  avatar_url TEXT,
-  is_active BOOLEAN NOT NULL DEFAULT true,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+-- =====================
+-- PROFILES TABLE
+-- =====================
+create table if not exists public.profiles (
+  id uuid references auth.users(id) on delete cascade primary key,
+  full_name text not null,
+  role text not null default 'technician' check (role in ('admin', 'technician')),
+  created_at timestamptz not null default now()
 );
 
--- Create machines table
-CREATE TABLE machines (
-  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-  name TEXT NOT NULL,
-  machine_code TEXT NOT NULL UNIQUE,
-  machine_type TEXT NOT NULL,
-  model TEXT,
-  manufacturer TEXT,
-  serial_number TEXT,
-  location TEXT NOT NULL,
-  department TEXT,
-  status machine_status NOT NULL DEFAULT 'operational',
-  last_maintenance_date DATE,
-  next_maintenance_date DATE,
-  installation_date DATE,
-  specifications JSONB,
-  notes TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+-- Auto-create profile on user signup
+create or replace function public.handle_new_user()
+returns trigger as $$
+begin
+  insert into public.profiles (id, full_name, role)
+  values (
+    new.id,
+    coalesce(new.raw_user_meta_data->>'full_name', split_part(new.email, '@', 1)),
+    coalesce(new.raw_user_meta_data->>'role', 'technician')
+  );
+  return new;
+end;
+$$ language plpgsql security definer;
+
+create or replace trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute procedure public.handle_new_user();
+
+-- =====================
+-- MACHINES TABLE
+-- =====================
+create table if not exists public.machines (
+  id uuid primary key default uuid_generate_v4(),
+  name text not null,
+  model text,
+  serial_number text,
+  location text not null,
+  status text not null default 'running' check (status in ('running', 'maintenance_due', 'breakdown', 'offline')),
+  notes text,
+  photo_url text,
+  installed_at timestamptz,
+  last_maintained_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
 );
 
--- Create maintenance_requests table
-CREATE TABLE maintenance_requests (
-  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-  request_number TEXT NOT NULL UNIQUE,
-  machine_id UUID REFERENCES machines(id) ON DELETE RESTRICT NOT NULL,
-  requested_by UUID REFERENCES profiles(id) ON DELETE RESTRICT NOT NULL,
-  assigned_to UUID REFERENCES profiles(id) ON DELETE SET NULL,
-  title TEXT NOT NULL,
-  description TEXT NOT NULL,
-  priority request_priority NOT NULL DEFAULT 'medium',
-  status request_status NOT NULL DEFAULT 'pending',
-  maintenance_type maintenance_type NOT NULL DEFAULT 'corrective',
-  scheduled_date TIMESTAMPTZ,
-  started_at TIMESTAMPTZ,
-  completed_at TIMESTAMPTZ,
-  estimated_duration INTEGER, -- in minutes
-  actual_duration INTEGER, -- in minutes
-  cost_estimate DECIMAL(12,2),
-  actual_cost DECIMAL(12,2),
-  notes TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+-- Auto-update updated_at
+create or replace function public.update_updated_at_column()
+returns trigger as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$ language plpgsql;
+
+create or replace trigger update_machines_updated_at
+  before update on public.machines
+  for each row execute procedure public.update_updated_at_column();
+
+-- =====================
+-- WORK ORDERS TABLE
+-- =====================
+create table if not exists public.work_orders (
+  id uuid primary key default uuid_generate_v4(),
+  machine_id uuid not null references public.machines(id) on delete cascade,
+  title text not null,
+  description text,
+  issue_type text not null check (issue_type in ('mechanical_failure', 'electrical_issue', 'lubrication', 'calibration', 'part_replacement', 'inspection', 'cleaning', 'other')),
+  priority text not null default 'medium' check (priority in ('low', 'medium', 'high', 'critical')),
+  status text not null default 'open' check (status in ('open', 'in_progress', 'resolved', 'closed')),
+  assigned_to uuid references public.profiles(id) on delete set null,
+  created_by uuid not null references public.profiles(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  resolved_at timestamptz
 );
 
--- Create maintenance_logs table
-CREATE TABLE maintenance_logs (
-  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-  request_id UUID REFERENCES maintenance_requests(id) ON DELETE CASCADE NOT NULL,
-  logged_by UUID REFERENCES profiles(id) ON DELETE RESTRICT NOT NULL,
-  action TEXT NOT NULL,
-  description TEXT NOT NULL,
-  time_spent INTEGER, -- in minutes
-  parts_used JSONB,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+create or replace trigger update_work_orders_updated_at
+  before update on public.work_orders
+  for each row execute procedure public.update_updated_at_column();
+
+create index if not exists work_orders_machine_id_idx on public.work_orders(machine_id);
+create index if not exists work_orders_status_idx on public.work_orders(status);
+create index if not exists work_orders_assigned_to_idx on public.work_orders(assigned_to);
+
+-- =====================
+-- PM SCHEDULES TABLE
+-- =====================
+create table if not exists public.pm_schedules (
+  id uuid primary key default uuid_generate_v4(),
+  machine_id uuid not null references public.machines(id) on delete cascade,
+  task_name text not null,
+  frequency text not null check (frequency in ('daily', 'weekly', 'monthly', 'quarterly', 'semi_annual', 'annual')),
+  last_done_at timestamptz,
+  next_due_at timestamptz not null,
+  status text not null default 'upcoming' check (status in ('upcoming', 'overdue', 'completed')),
+  notes text,
+  created_at timestamptz not null default now()
 );
 
--- Create spare_parts table
-CREATE TABLE spare_parts (
-  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-  part_code TEXT NOT NULL UNIQUE,
-  name TEXT NOT NULL,
-  description TEXT,
-  category TEXT,
-  unit TEXT NOT NULL DEFAULT 'pcs',
-  quantity_in_stock INTEGER NOT NULL DEFAULT 0,
-  minimum_stock INTEGER NOT NULL DEFAULT 0,
-  unit_price DECIMAL(12,2),
-  supplier TEXT,
-  location_in_warehouse TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+-- Auto-update PM status based on due date
+create or replace function public.update_pm_status()
+returns trigger as $$
+begin
+  if new.next_due_at < now() and new.status = 'upcoming' then
+    new.status = 'overdue';
+  end if;
+  return new;
+end;
+$$ language plpgsql;
+
+create or replace trigger check_pm_status
+  before insert or update on public.pm_schedules
+  for each row execute procedure public.update_pm_status();
+
+create index if not exists pm_schedules_machine_id_idx on public.pm_schedules(machine_id);
+create index if not exists pm_schedules_next_due_idx on public.pm_schedules(next_due_at);
+
+-- =====================
+-- DOWNTIME LOGS TABLE
+-- =====================
+create table if not exists public.downtime_logs (
+  id uuid primary key default uuid_generate_v4(),
+  machine_id uuid not null references public.machines(id) on delete cascade,
+  cause text not null,
+  description text,
+  start_time timestamptz not null default now(),
+  end_time timestamptz,
+  duration_minutes integer,
+  created_at timestamptz not null default now()
 );
 
--- Create updated_at trigger function
-CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
-BEGIN
-  NEW.updated_at = NOW();
-  RETURN NEW;
-END;
-$$ language 'plpgsql';
+create index if not exists downtime_logs_machine_id_idx on public.downtime_logs(machine_id);
+create index if not exists downtime_logs_start_time_idx on public.downtime_logs(start_time);
 
--- Apply updated_at triggers
-CREATE TRIGGER update_profiles_updated_at BEFORE UPDATE ON profiles
-  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+-- =====================
+-- ROW LEVEL SECURITY
+-- =====================
+alter table public.profiles enable row level security;
+alter table public.machines enable row level security;
+alter table public.work_orders enable row level security;
+alter table public.pm_schedules enable row level security;
+alter table public.downtime_logs enable row level security;
 
-CREATE TRIGGER update_machines_updated_at BEFORE UPDATE ON machines
-  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+-- Profiles: users can read all, update own
+create policy "profiles_select" on public.profiles for select using (true);
+create policy "profiles_update" on public.profiles for update using (auth.uid() = id);
 
-CREATE TRIGGER update_maintenance_requests_updated_at BEFORE UPDATE ON maintenance_requests
-  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
-CREATE TRIGGER update_spare_parts_updated_at BEFORE UPDATE ON spare_parts
-  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
--- Create request_number generation function
-CREATE OR REPLACE FUNCTION generate_request_number()
-RETURNS TRIGGER AS $$
-DECLARE
-  year_part TEXT;
-  seq_num INTEGER;
-  new_request_number TEXT;
-BEGIN
-  year_part := TO_CHAR(NOW(), 'YYYY');
-  SELECT COUNT(*) + 1 INTO seq_num
-  FROM maintenance_requests
-  WHERE EXTRACT(YEAR FROM created_at) = EXTRACT(YEAR FROM NOW());
-  new_request_number := 'MR-' || year_part || '-' || LPAD(seq_num::TEXT, 4, '0');
-  NEW.request_number := new_request_number;
-  RETURN NEW;
-END;
-$$ language 'plpgsql';
-
-CREATE TRIGGER generate_request_number_trigger
-  BEFORE INSERT ON maintenance_requests
-  FOR EACH ROW
-  WHEN (NEW.request_number IS NULL OR NEW.request_number = '')
-  EXECUTE FUNCTION generate_request_number();
-
--- Row Level Security (RLS)
-ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
-ALTER TABLE machines ENABLE ROW LEVEL SECURITY;
-ALTER TABLE maintenance_requests ENABLE ROW LEVEL SECURITY;
-ALTER TABLE maintenance_logs ENABLE ROW LEVEL SECURITY;
-ALTER TABLE spare_parts ENABLE ROW LEVEL SECURITY;
-
--- RLS Policies for profiles
-CREATE POLICY "Users can view all profiles" ON profiles FOR SELECT USING (true);
-CREATE POLICY "Users can update own profile" ON profiles FOR UPDATE USING (auth.uid() = id);
-CREATE POLICY "Admins can update any profile" ON profiles FOR UPDATE USING (
-  EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin')
+-- Machines: authenticated users can read; admin can write
+create policy "machines_select" on public.machines for select using (auth.role() = 'authenticated');
+create policy "machines_insert" on public.machines for insert with check (auth.role() = 'authenticated');
+create policy "machines_update" on public.machines for update using (auth.role() = 'authenticated');
+create policy "machines_delete" on public.machines for delete using (
+  exists (select 1 from public.profiles where id = auth.uid() and role = 'admin')
 );
 
--- RLS Policies for machines
-CREATE POLICY "All authenticated users can view machines" ON machines FOR SELECT USING (auth.role() = 'authenticated');
-CREATE POLICY "Admins and managers can insert machines" ON machines FOR INSERT WITH CHECK (
-  EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('admin', 'manager'))
-);
-CREATE POLICY "Admins and managers can update machines" ON machines FOR UPDATE USING (
-  EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('admin', 'manager'))
-);
-
--- RLS Policies for maintenance_requests
-CREATE POLICY "All authenticated users can view requests" ON maintenance_requests FOR SELECT USING (auth.role() = 'authenticated');
-CREATE POLICY "Authenticated users can create requests" ON maintenance_requests FOR INSERT WITH CHECK (auth.role() = 'authenticated');
-CREATE POLICY "Requestors and admins can update requests" ON maintenance_requests FOR UPDATE USING (
-  auth.uid() = requested_by OR
-  EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('admin', 'manager'))
+-- Work Orders
+create policy "wo_select" on public.work_orders for select using (auth.role() = 'authenticated');
+create policy "wo_insert" on public.work_orders for insert with check (auth.role() = 'authenticated');
+create policy "wo_update" on public.work_orders for update using (auth.role() = 'authenticated');
+create policy "wo_delete" on public.work_orders for delete using (
+  exists (select 1 from public.profiles where id = auth.uid() and role = 'admin')
 );
 
--- RLS Policies for maintenance_logs
-CREATE POLICY "All authenticated users can view logs" ON maintenance_logs FOR SELECT USING (auth.role() = 'authenticated');
-CREATE POLICY "Authenticated users can create logs" ON maintenance_logs FOR INSERT WITH CHECK (auth.role() = 'authenticated');
-
--- RLS Policies for spare_parts
-CREATE POLICY "All authenticated users can view spare parts" ON spare_parts FOR SELECT USING (auth.role() = 'authenticated');
-CREATE POLICY "Admins and managers can manage spare parts" ON spare_parts FOR ALL USING (
-  EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('admin', 'manager'))
+-- PM Schedules
+create policy "pm_select" on public.pm_schedules for select using (auth.role() = 'authenticated');
+create policy "pm_insert" on public.pm_schedules for insert with check (auth.role() = 'authenticated');
+create policy "pm_update" on public.pm_schedules for update using (auth.role() = 'authenticated');
+create policy "pm_delete" on public.pm_schedules for delete using (
+  exists (select 1 from public.profiles where id = auth.uid() and role = 'admin')
 );
 
--- Create indexes for better performance
-CREATE INDEX idx_machines_status ON machines(status);
-CREATE INDEX idx_machines_department ON machines(department);
-CREATE INDEX idx_maintenance_requests_status ON maintenance_requests(status);
-CREATE INDEX idx_maintenance_requests_priority ON maintenance_requests(priority);
-CREATE INDEX idx_maintenance_requests_machine_id ON maintenance_requests(machine_id);
-CREATE INDEX idx_maintenance_requests_requested_by ON maintenance_requests(requested_by);
-CREATE INDEX idx_maintenance_requests_assigned_to ON maintenance_requests(assigned_to);
-CREATE INDEX idx_maintenance_logs_request_id ON maintenance_logs(request_id);
-CREATE INDEX idx_spare_parts_category ON spare_parts(category);
+-- Downtime Logs
+create policy "downtime_select" on public.downtime_logs for select using (auth.role() = 'authenticated');
+create policy "downtime_insert" on public.downtime_logs for insert with check (auth.role() = 'authenticated');
+create policy "downtime_update" on public.downtime_logs for update using (auth.role() = 'authenticated');
+create policy "downtime_delete" on public.downtime_logs for delete using (
+  exists (select 1 from public.profiles where id = auth.uid() and role = 'admin')
+);
+
+-- =====================
+-- ENABLE REALTIME
+-- =====================
+alter publication supabase_realtime add table public.machines;
+alter publication supabase_realtime add table public.work_orders;
+alter publication supabase_realtime add table public.downtime_logs;

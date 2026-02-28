@@ -1,18 +1,41 @@
-/**
- * Type-safe Supabase mutation helper.
- * Needed because TypeScript 5.9+ has stricter inference with Supabase's
- * PostgrestVersion "12" types, causing insert/update to resolve as `never`.
- * This helper bypasses the type issue while keeping runtime safety.
- */
+import { createClient } from './client';
 
-import type { Database } from '@/types/database'
-import type { SupabaseClient } from '@supabase/supabase-js'
+export async function addMachine(payload: {
+  name: string;
+  model: string | null;
+  serial_number: string | null;
+  location: string;
+  status: string;
+  notes: string | null;
+  installed_at: string | null;
+}) {
+  const supabase = createClient();
+  return supabase.from('machines').insert(payload);
+}
 
-/**
- * Returns an untyped version of the supabase client for use with
- * insert/update/delete mutations where TypeScript 5.9 type inference fails.
- */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function getMutationClient(supabase: SupabaseClient<Database>): any {
-  return supabase
+export async function updateMachineStatus(machineId: string, status: string) {
+  const supabase = createClient();
+  return supabase.from('machines').update({ status, last_maintained_at: new Date().toISOString() }).eq('id', machineId);
+}
+
+export async function createWorkOrder(payload: {
+  machine_id: string;
+  title: string;
+  description: string | null;
+  issue_type: string;
+  priority: string;
+  assigned_to: string | null;
+  created_by: string;
+}) {
+  const supabase = createClient();
+  return supabase.from('work_orders').insert(payload);
+}
+
+export async function updateWorkOrderStatus(woId: string, status: string) {
+  const supabase = createClient();
+  const update: any = { status };
+  if (status === 'resolved' || status === 'closed') {
+    update.resolved_at = new Date().toISOString();
+  }
+  return supabase.from('work_orders').update(update).eq('id', woId);
 }

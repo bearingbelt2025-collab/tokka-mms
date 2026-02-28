@@ -9,256 +9,184 @@ export type Json =
 export interface Database {
   public: {
     Tables: {
-      profiles: {
-        Row: {
-          id: string
-          email: string
-          full_name: string | null
-          role: 'admin' | 'manager' | 'operator' | 'viewer'
-          department: string | null
-          avatar_url: string | null
-          is_active: boolean
-          created_at: string
-          updated_at: string
-        }
-        Insert: {
-          id: string
-          email: string
-          full_name?: string | null
-          role?: 'admin' | 'manager' | 'operator' | 'viewer'
-          department?: string | null
-          avatar_url?: string | null
-          is_active?: boolean
-          created_at?: string
-          updated_at?: string
-        }
-        Update: {
-          id?: string
-          email?: string
-          full_name?: string | null
-          role?: 'admin' | 'manager' | 'operator' | 'viewer'
-          department?: string | null
-          avatar_url?: string | null
-          is_active?: boolean
-          created_at?: string
-          updated_at?: string
-        }
-      }
       machines: {
         Row: {
           id: string
           name: string
-          machine_code: string
-          machine_type: string
           model: string | null
-          manufacturer: string | null
           serial_number: string | null
           location: string
-          department: string | null
-          status: 'operational' | 'maintenance' | 'breakdown' | 'idle' | 'decommissioned'
-          last_maintenance_date: string | null
-          next_maintenance_date: string | null
-          installation_date: string | null
-          specifications: Json | null
+          status: string
           notes: string | null
+          photo_url: string | null
+          installed_at: string | null
+          last_maintained_at: string | null
           created_at: string
           updated_at: string
         }
         Insert: {
           id?: string
           name: string
-          machine_code: string
-          machine_type: string
           model?: string | null
-          manufacturer?: string | null
           serial_number?: string | null
           location: string
-          department?: string | null
-          status?: 'operational' | 'maintenance' | 'breakdown' | 'idle' | 'decommissioned'
-          last_maintenance_date?: string | null
-          next_maintenance_date?: string | null
-          installation_date?: string | null
-          specifications?: Json | null
+          status?: string
           notes?: string | null
+          photo_url?: string | null
+          installed_at?: string | null
+          last_maintained_at?: string | null
           created_at?: string
           updated_at?: string
         }
         Update: {
           id?: string
           name?: string
-          machine_code?: string
-          machine_type?: string
           model?: string | null
-          manufacturer?: string | null
           serial_number?: string | null
           location?: string
-          department?: string | null
-          status?: 'operational' | 'maintenance' | 'breakdown' | 'idle' | 'decommissioned'
-          last_maintenance_date?: string | null
-          next_maintenance_date?: string | null
-          installation_date?: string | null
-          specifications?: Json | null
+          status?: string
           notes?: string | null
+          photo_url?: string | null
+          installed_at?: string | null
+          last_maintained_at?: string | null
           created_at?: string
           updated_at?: string
         }
       }
-      maintenance_requests: {
+      profiles: {
         Row: {
           id: string
-          request_number: string
+          full_name: string
+          role: string
+          created_at: string
+        }
+        Insert: {
+          id: string
+          full_name: string
+          role?: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          full_name?: string
+          role?: string
+          created_at?: string
+        }
+      }
+      work_orders: {
+        Row: {
+          id: string
           machine_id: string
-          requested_by: string
-          assigned_to: string | null
           title: string
-          description: string
-          priority: 'low' | 'medium' | 'high' | 'critical'
-          status: 'pending' | 'approved' | 'in_progress' | 'completed' | 'cancelled' | 'rejected'
-          maintenance_type: 'preventive' | 'corrective' | 'predictive' | 'emergency'
-          scheduled_date: string | null
-          started_at: string | null
-          completed_at: string | null
-          estimated_duration: number | null
-          actual_duration: number | null
-          cost_estimate: number | null
-          actual_cost: number | null
+          description: string | null
+          issue_type: string
+          priority: string
+          status: string
+          assigned_to: string | null
+          created_by: string
+          created_at: string
+          updated_at: string
+          resolved_at: string | null
+        }
+        Insert: {
+          id?: string
+          machine_id: string
+          title: string
+          description?: string | null
+          issue_type: string
+          priority: string
+          status?: string
+          assigned_to?: string | null
+          created_by: string
+          created_at?: string
+          updated_at?: string
+          resolved_at?: string | null
+        }
+        Update: {
+          id?: string
+          machine_id?: string
+          title?: string
+          description?: string | null
+          issue_type?: string
+          priority?: string
+          status?: string
+          assigned_to?: string | null
+          created_by?: string
+          created_at?: string
+          updated_at?: string
+          resolved_at?: string | null
+        }
+      }
+      pm_schedules: {
+        Row: {
+          id: string
+          machine_id: string
+          task_name: string
+          frequency: string
+          last_done_at: string | null
+          next_due_at: string
+          status: string
           notes: string | null
           created_at: string
-          updated_at: string
         }
         Insert: {
           id?: string
-          request_number?: string
           machine_id: string
-          requested_by: string
-          assigned_to?: string | null
-          title: string
-          description: string
-          priority?: 'low' | 'medium' | 'high' | 'critical'
-          status?: 'pending' | 'approved' | 'in_progress' | 'completed' | 'cancelled' | 'rejected'
-          maintenance_type?: 'preventive' | 'corrective' | 'predictive' | 'emergency'
-          scheduled_date?: string | null
-          started_at?: string | null
-          completed_at?: string | null
-          estimated_duration?: number | null
-          actual_duration?: number | null
-          cost_estimate?: number | null
-          actual_cost?: number | null
+          task_name: string
+          frequency: string
+          last_done_at?: string | null
+          next_due_at: string
+          status?: string
           notes?: string | null
           created_at?: string
-          updated_at?: string
         }
         Update: {
           id?: string
-          request_number?: string
           machine_id?: string
-          requested_by?: string
-          assigned_to?: string | null
-          title?: string
-          description?: string
-          priority?: 'low' | 'medium' | 'high' | 'critical'
-          status?: 'pending' | 'approved' | 'in_progress' | 'completed' | 'cancelled' | 'rejected'
-          maintenance_type?: 'preventive' | 'corrective' | 'predictive' | 'emergency'
-          scheduled_date?: string | null
-          started_at?: string | null
-          completed_at?: string | null
-          estimated_duration?: number | null
-          actual_duration?: number | null
-          cost_estimate?: number | null
-          actual_cost?: number | null
+          task_name?: string
+          frequency?: string
+          last_done_at?: string | null
+          next_due_at?: string
+          status?: string
           notes?: string | null
           created_at?: string
-          updated_at?: string
         }
       }
-      maintenance_logs: {
+      downtime_logs: {
         Row: {
           id: string
-          request_id: string
-          logged_by: string
-          action: string
-          description: string
-          time_spent: number | null
-          parts_used: Json | null
-          created_at: string
-        }
-        Insert: {
-          id?: string
-          request_id: string
-          logged_by: string
-          action: string
-          description: string
-          time_spent?: number | null
-          parts_used?: Json | null
-          created_at?: string
-        }
-        Update: {
-          id?: string
-          request_id?: string
-          logged_by?: string
-          action?: string
-          description?: string
-          time_spent?: number | null
-          parts_used?: Json | null
-          created_at?: string
-        }
-      }
-      spare_parts: {
-        Row: {
-          id: string
-          part_code: string
-          name: string
+          machine_id: string
+          cause: string
           description: string | null
-          category: string | null
-          unit: string
-          quantity_in_stock: number
-          minimum_stock: number
-          unit_price: number | null
-          supplier: string | null
-          location_in_warehouse: string | null
+          start_time: string
+          end_time: string | null
+          duration_minutes: number | null
           created_at: string
-          updated_at: string
         }
         Insert: {
           id?: string
-          part_code: string
-          name: string
+          machine_id: string
+          cause: string
           description?: string | null
-          category?: string | null
-          unit?: string
-          quantity_in_stock?: number
-          minimum_stock?: number
-          unit_price?: number | null
-          supplier?: string | null
-          location_in_warehouse?: string | null
+          start_time: string
+          end_time?: string | null
+          duration_minutes?: number | null
           created_at?: string
-          updated_at?: string
         }
         Update: {
           id?: string
-          part_code?: string
-          name?: string
+          machine_id?: string
+          cause?: string
           description?: string | null
-          category?: string | null
-          unit?: string
-          quantity_in_stock?: number
-          minimum_stock?: number
-          unit_price?: number | null
-          supplier?: string | null
-          location_in_warehouse?: string | null
+          start_time?: string
+          end_time?: string | null
+          duration_minutes?: number | null
           created_at?: string
-          updated_at?: string
         }
       }
     }
-    Views: {
-      [_ in never]: never
-    }
-    Functions: {
-      [_ in never]: never
-    }
-    Enums: {
-      [_ in never]: never
-    }
+    Views: {}
+    Functions: {}
+    Enums: {}
   }
 }

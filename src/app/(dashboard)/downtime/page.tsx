@@ -1,301 +1,227 @@
-'use client'
+'use client';
 
-import { useEffect, useState, useCallback } from 'react'
-import { useSupabase } from '@/hooks/use-supabase'
-import { createClient } from '@/lib/supabase/client'
-import { Clock, Plus, Square, AlertTriangle } from 'lucide-react'
-import { format, differenceInMinutes } from 'date-fns'
-import { useToast } from '@/hooks/use-toast'
-import { useAuth } from '@/contexts/auth-context'
-import { PageHeader } from '@/components/page-header'
-import { EmptyState } from '@/components/empty-state'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import type { Machine, DowntimeLog, DowntimeLogInsert } from '@/types/database'
+import { useEffect, useState } from 'react';
+import { createClient } from '@/lib/supabase/client';
+import { useAuth } from '@/contexts/auth-context';
+import { PageHeader } from '@/components/page-header';
+import { LoadingSkeleton } from '@/components/loading-skeleton';
+import { EmptyState } from '@/components/empty-state';
+import {
+  AlertTriangle,
+  Plus,
+  Clock,
+  CheckCircle,
+  StopCircle,
+} from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
+import { Card, CardContent } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { DOWNTIME_CAUSES } from '@/lib/constants';
 
-type DowntimeLogWithDetails = DowntimeLog & {
-  machine: { id: number; name: string } | null
-  logged_by_profile: { name: string } | null
+interface DowntimeLog {
+  id: string;
+  machine_id: string;
+  cause: string;
+  description: string | null;
+  start_time: string;
+  end_time: string | null;
+  duration_minutes: number | null;
+  machines: { name: string } | null;
 }
-
-function formatDuration(minutes: number): string {
-  if (minutes < 60) return `${minutes}m`
-  const h = Math.floor(minutes / 60)
-  const m = minutes % 60
-  return m > 0 ? `${h}h ${m}m` : `${h}h`
-}
-
-// ─── Live Duration Counter ─────────────────────────────────────────────────────
-
-function LiveDuration({ startedAt }: { startedAt: string }) {
-  const [minutes, setMinutes] = useState(differenceInMinutes(new Date(), new Date(startedAt)))
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setMinutes(differenceInMinutes(new Date(), new Date(startedAt)))
-    }, 60000)
-    return () => clearInterval(interval)
-  }, [startedAt])
-
-  return (
-    <span className="font-mono-display font-bold text-red-400">
-      {formatDuration(minutes)}
-    </span>
-  )
-}
-
-// ─── Log Downtime Dialog ───────────────────────────────────────────────────────────────────────
-
-function LogDowntimeDialog({
-  open,
-  onClose,
-  onLogged,
-  availableMachines,
-}: {
-  open: boolean
-  onClose: () => void
-  onLogged: () => void
-  availableMachines: Machine[] // machines not currently in active downtime
-}) {
-  const supabase = createClient()
-  const { user } = useAuth()
-  const { toast } = useToast()
-  const [machineId, setMachineId] = useState('')
-  const [reason, setReason] = useState('')
-  const [loading, setLoading] = useState(false)
-
-  const resetForm = () => { setMachineId(''); setReason('') }
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!user) return
-    setLoading(true)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const sb = supabase as any
-
-    try {
-      // Get profile id
-      const { data: profileRaw } = await sb
-        .from('profiles')
-        .select('id')
-        .eq('id', user.id)
-        .single()
-      const profileData = profileRaw as { id: string } | null
-      if (!profileData) throw new Error('Profile not found')
-
-      const insert: DowntimeLogInsert = {
-        machine_id: parseInt(machineId),
-        reason: reason || null,
-        logged_by: profileData.id,
-        started_at: new Date().toISOString(),
-      }
-
-      const { error: logError } = await sb.from('downtime_logs').insert(insert)
-      if (logError) throw logError
-
-      // Update machine status to breakdown
-      const { error: machineError } = await sb
-        .from('machines')
-        .update({ status: 'breakdown' })
-        .eq('id', parseInt(machineId))
-      if (machineError) console.warn('Could not update machine status:', machineError.message)
-
-      toast({ title: 'Downtime logged', description: 'Machine status set to Breakdown.' })
-      resetForm()
-      onLogged()
-      onClose()
-    } catch (err: unknown) {
-      toast({ variant: 'destructive', title: 'Error', description: (err as Error).message })
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={(v) => { if (!v) { resetForm(); onClose() } }}>
-      <DialogContent className="bg-card border-border max-w-sm">
-        <DialogHeader>
-          <DialogTitle className="font-mono-display">Log Downtime</DialogTitle>
-        </DialogHeader>
-        <form onSubmit={handleSubmit} className="space-y-4 mt-2">
-          <div className="space-y-1.5">
-            <Label className="text-xs text-muted-foreground uppercase tracking-wide">Machine *</Label>
-            <Select value={machineId} onValueChange={setMachineId} required>
-              <SelectTrigger className="bg-background border-border">
-                <SelectValue placeholder="Select machine..." />
-              </SelectTrigger>
-              <SelectContent className="bg-card border-border">
-                {availableMachines.length === 0 ? (
-                  <div className="px-3 py-2 text-xs text-muted-foreground">All machines already in downtime</div>
-                ) : (
-                  availableMachines.map((m) => (
-                    <SelectItem key={m.id} value={String(m.id)}>
-                      {m.name} — {m.location}
-                    </SelectItem>
-                  ))
-                )}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-1.5">
-            <Label className="text-xs text-muted-foreground uppercase tracking-wide">Reason</Label>
-            <Input
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              placeholder="e.g. Motor failure, belt snap..."
-              className="bg-background"
-            />
-          </div>
-
-          <div className="flex gap-2 pt-1">
-            <Button type="button" variant="outline" className="flex-1" onClick={() => { resetForm(); onClose() }}>Cancel</Button>
-            <Button
-              type="submit"
-              disabled={loading || !machineId}
-              className="flex-1 bg-red-600 hover:bg-red-700 text-white font-medium"
-            >
-              {loading ? 'Logging...' : 'Log Downtime'}
-            </Button>
-          </div>
-        </form>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-// ─── Main Page ────────────────────────────────────────────────────────────────────────────────────────────
 
 export default function DowntimePage() {
-  const supabase = useSupabase()
-  const { toast } = useToast()
-  const [allLogs, setAllLogs] = useState<DowntimeLogWithDetails[]>([])
-  const [machines, setMachines] = useState<Machine[]>([])
-  const [loading, setLoading] = useState(true)
-  const [logOpen, setLogOpen] = useState(false)
-  const [ending, setEnding] = useState<number | null>(null)
+  const [logs, setLogs] = useState<DowntimeLog[]>([]);
+  const [machines, setMachines] = useState<{ id: string; name: string }[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [now, setNow] = useState(new Date());
+  const { profile } = useAuth();
 
-  const fetchData = useCallback(async () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const sb = supabase as any
-    const [logsRes, machinesRes] = await Promise.all([
-      sb
-        .from('downtime_logs')
-        .select('*, machine:machines(id, name), logged_by_profile:profiles!downtime_logs_logged_by_fkey(name)')
-        .order('started_at', { ascending: false })
-        .limit(100),
-      supabase.from('machines').select('*').order('name'),
-    ])
-    setAllLogs((logsRes.data ?? []) as DowntimeLogWithDetails[])
-    setMachines(machinesRes.data ?? [])
-    setLoading(false)
-  }, [supabase])
+  // Live clock for active downtime
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 60000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
-    fetchData()
-
+    fetchAll();
+    const supabase = createClient();
     const channel = supabase
-      .channel('downtime-page')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'downtime_logs' }, fetchData)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'machines' }, fetchData)
-      .subscribe()
+      .channel('downtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'downtime_logs' }, fetchAll)
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, []);
 
-    return () => { supabase.removeChannel(channel) }
-  }, [fetchData, supabase])
-
-  const activeLogs = allLogs.filter((l) => l.ended_at === null)
-  const historyLogs = allLogs.filter((l) => l.ended_at !== null)
-
-  // Machines not currently in active downtime
-  const activeMachineIds = new Set(activeLogs.map((l) => l.machine_id))
-  const availableMachines = machines.filter((m) => !activeMachineIds.has(m.id))
-
-  const handleEndDowntime = async (log: DowntimeLogWithDetails) => {
-    setEnding(log.id)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const sb = supabase as any
-    try {
-      const endedAt = new Date()
-      const durationMinutes = differenceInMinutes(endedAt, new Date(log.started_at))
-
-      const { error: logError } = await sb
+  const fetchAll = async () => {
+    const supabase = createClient();
+    const [logRes, machRes] = await Promise.all([
+      supabase
         .from('downtime_logs')
-        .update({ ended_at: endedAt.toISOString(), duration_minutes: durationMinutes })
-        .eq('id', log.id)
-      if (logError) throw logError
+        .select('*, machines(name)')
+        .order('start_time', { ascending: false }),
+      supabase.from('machines').select('id, name').order('name'),
+    ]);
+    setLogs(logRes.data || []);
+    setMachines(machRes.data || []);
+    setLoading(false);
+  };
 
-      // Check if machine has other active downtimes
-      const { data: otherActive } = await sb
-        .from('downtime_logs')
-        .select('id')
-        .eq('machine_id', log.machine_id)
-        .is('ended_at', null)
-        .neq('id', log.id)
+  const handleLogDowntime = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const form = e.currentTarget;
+    const fd = new FormData(form);
+    const supabase = createClient();
+    await supabase.from('downtime_logs').insert({
+      machine_id: fd.get('machine_id') as string,
+      cause: fd.get('cause') as string,
+      description: fd.get('description') as string || null,
+      start_time: new Date().toISOString(),
+    });
+    // Also update machine status to breakdown
+    const machineId = fd.get('machine_id') as string;
+    await supabase.from('machines').update({ status: 'breakdown' }).eq('id', machineId);
+    setDialogOpen(false);
+    fetchAll();
+  };
 
-      if (!otherActive?.length) {
-        await sb.from('machines').update({ status: 'running' }).eq('id', log.machine_id)
-      }
+  const handleEndDowntime = async (log: DowntimeLog) => {
+    const supabase = createClient();
+    const end = new Date();
+    const start = new Date(log.start_time);
+    const durationMinutes = Math.round((end.getTime() - start.getTime()) / 60000);
+    await supabase.from('downtime_logs').update({
+      end_time: end.toISOString(),
+      duration_minutes: durationMinutes,
+    }).eq('id', log.id);
+    // Update machine back to running
+    await supabase.from('machines').update({ status: 'running' }).eq('id', log.machine_id);
+    fetchAll();
+  };
 
-      toast({
-        title: 'Downtime ended',
-        description: `Duration: ${formatDuration(durationMinutes)}. Machine set to Running.`,
-      })
-      fetchData()
-    } catch (err: unknown) {
-      toast({ variant: 'destructive', title: 'Error', description: (err as Error).message })
-    } finally {
-      setEnding(null)
+  const formatDuration = (log: DowntimeLog) => {
+    if (log.duration_minutes) {
+      const h = Math.floor(log.duration_minutes / 60);
+      const m = log.duration_minutes % 60;
+      return h > 0 ? `${h}h ${m}m` : `${m}m`;
     }
-  }
+    if (!log.end_time) {
+      const diffMin = Math.round((now.getTime() - new Date(log.start_time).getTime()) / 60000);
+      const h = Math.floor(diffMin / 60);
+      const m = diffMin % 60;
+      return `${h > 0 ? h + 'h ' : ''}${m}m (live)`;
+    }
+    return '—';
+  };
+
+  if (loading) return <LoadingSkeleton />;
+
+  const activeDowntime = logs.filter(l => !l.end_time);
+  const totalHours = logs
+    .filter(l => l.duration_minutes)
+    .reduce((sum, l) => sum + (l.duration_minutes || 0), 0) / 60;
 
   return (
-    <div>
+    <div className="space-y-4">
       <PageHeader
-        title="Downtime Tracking"
-        subtitle={`${activeLogs.length} active`}
-        action={{ label: 'Log Downtime', onClick: () => setLogOpen(true), icon: Plus }}
+        title="Downtime Tracker"
+        description="Log and monitor machine downtime"
+        action={
+          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+            <DialogTrigger asChild>
+              <Button size="sm" variant="destructive" className="gap-1.5">
+                <Plus className="h-4 w-4" /> Log Downtime
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-md">
+              <DialogHeader>
+                <DialogTitle>Log Machine Downtime</DialogTitle>
+              </DialogHeader>
+              <form onSubmit={handleLogDowntime} className="space-y-3">
+                <div className="space-y-1">
+                  <Label>Machine *</Label>
+                  <Select name="machine_id" required>
+                    <SelectTrigger><SelectValue placeholder="Select machine" /></SelectTrigger>
+                    <SelectContent>
+                      {machines.map(m => (
+                        <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label>Cause *</Label>
+                  <Select name="cause" required>
+                    <SelectTrigger><SelectValue placeholder="Select cause" /></SelectTrigger>
+                    <SelectContent>
+                      {DOWNTIME_CAUSES.map(c => (
+                        <SelectItem key={c} value={c}>{c}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label>Description</Label>
+                  <Textarea name="description" rows={2} placeholder="What happened?" />
+                </div>
+                <div className="flex gap-2 pt-2">
+                  <Button type="submit" variant="destructive" className="flex-1">Start Downtime Log</Button>
+                  <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
+                </div>
+              </form>
+            </DialogContent>
+          </Dialog>
+        }
       />
 
-      {/* Active Downtimes */}
-      {activeLogs.length > 0 && (
-        <div className="mb-6">
-          <div className="flex items-center gap-2 mb-3">
-            <AlertTriangle className="h-4 w-4 text-red-400 animate-pulse" />
-            <h2 className="text-sm font-semibold font-mono-display text-red-400">
-              Active Downtime ({activeLogs.length})
-            </h2>
+      {/* Active Downtime Alert */}
+      {activeDowntime.length > 0 && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-3">
+          <div className="flex items-center gap-2 text-red-700 mb-2">
+            <AlertTriangle className="h-4 w-4" />
+            <span className="font-medium text-sm">{activeDowntime.length} Machine(s) Currently Down</span>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {activeLogs.map((log) => (
-              <div
-                key={log.id}
-                className="bg-card border border-red-500/40 border-l-4 border-l-red-500 rounded-md p-4"
-              >
-                <div className="flex items-start justify-between gap-2 mb-2">
-                  <div>
-                    <p className="text-sm font-semibold font-mono-display">{log.machine?.name ?? 'Unknown'}</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">{log.reason ?? 'No reason given'}</p>
-                  </div>
-                  <div className="text-right shrink-0">
-                    <p className="text-xs text-muted-foreground">Duration</p>
-                    <LiveDuration startedAt={log.started_at} />
-                  </div>
+          <div className="space-y-2">
+            {activeDowntime.map(log => (
+              <div key={log.id} className="flex items-center justify-between">
+                <div>
+                  <span className="font-medium text-sm text-red-800">{log.machines?.name}</span>
+                  <span className="text-xs text-red-600 ml-2">{log.cause}</span>
                 </div>
-                <div className="flex items-center justify-between">
-                  <p className="text-xs text-muted-foreground">
-                    Since {format(new Date(log.started_at), 'HH:mm, MMM d')}
-                  </p>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-red-600">{formatDuration(log)}</span>
                   <Button
                     size="sm"
-                    disabled={ending === log.id}
+                    variant="outline"
+                    className="h-7 text-xs gap-1 border-red-200"
                     onClick={() => handleEndDowntime(log)}
-                    className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white"
                   >
-                    <Square className="h-3 w-3 mr-1" />
-                    {ending === log.id ? 'Ending...' : 'End Downtime'}
+                    <StopCircle className="h-3 w-3" /> End
                   </Button>
                 </div>
               </div>
@@ -304,100 +230,80 @@ export default function DowntimePage() {
         </div>
       )}
 
-      {/* Downtime History */}
-      <div>
-        <div className="flex items-center gap-2 mb-3">
-          <Clock className="h-4 w-4 text-muted-foreground" />
-          <h2 className="text-sm font-semibold font-mono-display">
-            History ({historyLogs.length})
-          </h2>
-        </div>
-
-        {loading ? (
-          <div className="space-y-2">
-            {Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className="bg-card border border-border rounded-md p-4 animate-pulse h-16" />
-            ))}
-          </div>
-        ) : historyLogs.length === 0 ? (
-          <EmptyState
-            title="No downtime history"
-            description="Completed downtime events will appear here"
-            icon={Clock}
-            className="py-8"
-          />
-        ) : (
-          <>
-            {/* Desktop table */}
-            <div className="hidden sm:block bg-card border border-border rounded-md overflow-hidden">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border bg-secondary/50">
-                    <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">Machine</th>
-                    <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">Reason</th>
-                    <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">Start</th>
-                    <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">End</th>
-                    <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">Duration</th>
-                    <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">Logged By</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {historyLogs.map((log) => (
-                    <tr key={log.id} className="hover:bg-secondary/20 transition-colors">
-                      <td className="px-4 py-3 font-mono-display font-semibold text-sm">{log.machine?.name ?? '—'}</td>
-                      <td className="px-4 py-3 text-sm text-muted-foreground max-w-[200px] truncate">{log.reason ?? '—'}</td>
-                      <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
-                        {format(new Date(log.started_at), 'MMM d, HH:mm')}
-                      </td>
-                      <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
-                        {log.ended_at ? format(new Date(log.ended_at), 'MMM d, HH:mm') : '—'}
-                      </td>
-                      <td className="px-4 py-3">
-                        {log.duration_minutes !== null ? (
-                          <span className="font-mono-display text-xs bg-secondary px-1.5 py-0.5 rounded-sm">
-                            {formatDuration(log.duration_minutes)}
-                          </span>
-                        ) : '—'}
-                      </td>
-                      <td className="px-4 py-3 text-xs text-muted-foreground">{log.logged_by_profile?.name ?? '—'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Mobile cards */}
-            <div className="sm:hidden space-y-2">
-              {historyLogs.map((log) => (
-                <div key={log.id} className="bg-card border border-border rounded-md p-3">
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <p className="text-sm font-semibold font-mono-display">{log.machine?.name ?? '—'}</p>
-                      <p className="text-xs text-muted-foreground">{log.reason ?? 'No reason'}</p>
-                    </div>
-                    {log.duration_minutes !== null && (
-                      <span className="font-mono-display text-xs bg-secondary px-1.5 py-0.5 rounded-sm shrink-0">
-                        {formatDuration(log.duration_minutes)}
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-center justify-between mt-2 text-xs text-muted-foreground">
-                    <span>{format(new Date(log.started_at), 'MMM d, HH:mm')}</span>
-                    <span>{log.logged_by_profile?.name ?? '—'}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
+      {/* Summary */}
+      <div className="grid grid-cols-3 gap-3">
+        <Card>
+          <CardContent className="pt-4">
+            <p className="text-2xl font-bold">{activeDowntime.length}</p>
+            <p className="text-xs text-muted-foreground">Active Now</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-4">
+            <p className="text-2xl font-bold">{logs.length}</p>
+            <p className="text-xs text-muted-foreground">Total Incidents</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-4">
+            <p className="text-2xl font-bold">{Math.round(totalHours * 10) / 10}h</p>
+            <p className="text-xs text-muted-foreground">Total Hours</p>
+          </CardContent>
+        </Card>
       </div>
 
-      <LogDowntimeDialog
-        open={logOpen}
-        onClose={() => setLogOpen(false)}
-        onLogged={fetchData}
-        availableMachines={availableMachines}
-      />
+      {/* Downtime Table */}
+      {logs.length === 0 ? (
+        <EmptyState
+          icon={<AlertTriangle className="h-8 w-8" />}
+          title="No downtime logged"
+          description="Log downtime when a machine goes down"
+        />
+      ) : (
+        <div className="rounded-lg border bg-white overflow-hidden">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Machine</TableHead>
+                <TableHead>Cause</TableHead>
+                <TableHead className="hidden md:table-cell">Start Time</TableHead>
+                <TableHead>Duration</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead></TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {logs.map((log) => (
+                <TableRow key={log.id}>
+                  <TableCell className="font-medium text-sm">{log.machines?.name}</TableCell>
+                  <TableCell className="text-sm">{log.cause}</TableCell>
+                  <TableCell className="hidden md:table-cell text-xs text-muted-foreground">
+                    {new Date(log.start_time).toLocaleString()}
+                  </TableCell>
+                  <TableCell className="text-sm">{formatDuration(log)}</TableCell>
+                  <TableCell>
+                    <Badge variant={log.end_time ? 'secondary' : 'destructive'} className="text-xs">
+                      {log.end_time ? 'Resolved' : 'Active'}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    {!log.end_time && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 text-xs gap-1 text-green-600"
+                        onClick={() => handleEndDowntime(log)}
+                      >
+                        <CheckCircle className="h-3 w-3" /> Resolve
+                      </Button>
+                    )}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
     </div>
-  )
+  );
 }

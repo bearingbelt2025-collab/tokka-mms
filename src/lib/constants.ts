@@ -1,38 +1,61 @@
+export const MACHINE_STATUSES = [
+  { value: 'running', label: 'Running' },
+  { value: 'maintenance_due', label: 'Maintenance Due' },
+  { value: 'breakdown', label: 'Breakdown' },
+  { value: 'offline', label: 'Offline' },
+];
+
+export const MACHINE_LOCATIONS = [
+  'Wire Drawing Line 1',
+  'Wire Drawing Line 2',
+  'Nail Making Section',
+  'Packaging Area',
+  'Maintenance Bay',
+  'Utility Room',
+];
+
+export const WO_STATUSES = [
+  { value: 'open', label: 'Open' },
+  { value: 'in_progress', label: 'In Progress' },
+  { value: 'resolved', label: 'Resolved' },
+  { value: 'closed', label: 'Closed' },
+];
+
+export const PRIORITIES = ['low', 'medium', 'high', 'critical'];
+
 export const ISSUE_TYPES = [
-  'Bearing Failure',
-  'Belt Wear',
-  'Calibration',
-  'Conveyor Jam',
-  'Die Replacement',
-  'Electrical',
-  'Lubrication Required',
-  'Motor Overheating',
-  'Noise',
-  'Sensor Malfunction',
-  'Vibration',
+  'mechanical_failure',
+  'electrical_issue',
+  'lubrication',
+  'calibration',
+  'part_replacement',
+  'inspection',
+  'cleaning',
+  'other',
+];
+
+export const PM_FREQUENCIES = [
+  { value: 'daily', label: 'Daily' },
+  { value: 'weekly', label: 'Weekly' },
+  { value: 'monthly', label: 'Monthly' },
+  { value: 'quarterly', label: 'Quarterly' },
+  { value: 'semi_annual', label: 'Semi-Annual' },
+  { value: 'annual', label: 'Annual' },
+];
+
+export const DOWNTIME_CAUSES = [
+  'Mechanical Failure',
+  'Electrical Fault',
+  'Power Outage',
+  'Raw Material Issue',
+  'Operator Error',
+  'Scheduled Maintenance',
   'Other',
-] as const
+];
 
-export const PRIORITIES = ['low', 'medium', 'high', 'critical'] as const
-export const WORK_ORDER_STATUSES = ['open', 'assigned', 'in_progress', 'completed'] as const
-export const MACHINE_STATUSES = ['running', 'maintenance_due', 'breakdown'] as const
-
-export const PRIORITY_COLORS = {
-  low: 'bg-slate-500',
-  medium: 'bg-blue-500',
-  high: 'bg-amber-500',
-  critical: 'bg-red-500',
-} as const
-
-export const STATUS_COLORS = {
-  running: 'bg-emerald-500',
-  maintenance_due: 'bg-amber-500',
-  breakdown: 'bg-red-500',
-} as const
-
-export const WO_STATUS_COLORS = {
-  open: 'bg-slate-500',
-  assigned: 'bg-blue-500',
-  in_progress: 'bg-amber-500',
-  completed: 'bg-emerald-500',
-} as const
+export const PRIORITY_COLORS: Record<string, string> = {
+  low: 'text-green-700 bg-green-50 border-green-200',
+  medium: 'text-yellow-700 bg-yellow-50 border-yellow-200',
+  high: 'text-orange-700 bg-orange-50 border-orange-200',
+  critical: 'text-red-700 bg-red-50 border-red-200',
+};
